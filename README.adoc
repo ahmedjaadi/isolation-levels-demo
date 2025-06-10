@@ -1,0 +1,605 @@
+= Understanding Transaction Isolation Levels in DBMS
+:toc: left
+:toclevels: 3
+:sectnums:
+:source-highlighter: highlight.js
+:icons: font
+:imagesdir: images
+:experimental:
+
+JetBrains Junie <junie@jetbrains.com>
+v1.0, 2023-12-15
+
+== Introduction
+
+Database transactions are a fundamental concept in database management systems (DBMS) that ensure data integrity and consistency. A transaction is a sequence of operations performed as a single logical unit of work. The ACID properties (Atomicity, Consistency, Isolation, Durability) govern database transactions, with Isolation being particularly important for concurrent operations.
+
+In this article, we'll explore transaction isolation levels in detail, focusing on:
+
+* The anomalies that can occur without proper isolation
+* How different isolation levels prevent these anomalies
+* How to implement and manage transactions in Spring applications
+* Optimistic Concurrency Control (OCC) as an alternative approach
+
+We'll use a banking application as our example, demonstrating how transaction isolation levels affect operations like account balance updates and money transfers. You'll be able to follow along with practical examples using MySQL and a Spring Boot application.
+
+== Transaction Isolation Levels Explained
+
+=== Understanding Transaction Anomalies
+
+Before diving into isolation levels, let's understand the anomalies that can occur when multiple transactions run concurrently without proper isolation:
+
+==== Dirty Reads
+
+A dirty read occurs when a transaction reads data that has been modified by another transaction that has not yet been committed. If the modifying transaction rolls back, the reading transaction has read invalid data.
+
+==== Non-repeatable Reads
+
+A non-repeatable read occurs when a transaction reads the same row twice and gets different values each time. This happens when another transaction modifies the row between the first and second read.
+
+==== Phantom Reads
+
+A phantom read occurs when a transaction re-executes a query that returns a set of rows satisfying a condition, and finds that the set of rows has changed due to another transaction that committed during the execution of the first transaction.
+
+=== Isolation Levels and Their Characteristics
+
+Database systems provide different isolation levels to prevent these anomalies:
+
+[cols="1,1,1,1,3", options="header"]
+|===
+|Isolation Level |Dirty Reads |Non-repeatable Reads |Phantom Reads |Description
+
+|READ UNCOMMITTED
+|Possible
+|Possible
+|Possible
+|Lowest isolation level. Transactions can see uncommitted changes made by other transactions.
+
+|READ COMMITTED
+|Prevented
+|Possible
+|Possible
+|Transactions can only see committed changes made by other transactions.
+
+|REPEATABLE READ
+|Prevented
+|Prevented
+|Possible
+|Transactions see a consistent snapshot of the data as it was at the beginning of the transaction.
+
+|SERIALIZABLE
+|Prevented
+|Prevented
+|Prevented
+|Highest isolation level. Transactions are completely isolated from each other.
+|===
+
+=== Demonstrating Isolation Levels with MySQL
+
+Let's see these isolation levels in action using MySQL. We'll use a banking scenario with accounts and transactions.
+
+==== Setting Up the Database
+
+First, let's connect to MySQL and create our database:
+
+[source,sql]
+----
+mysql -u junie -p
+Enter password: junie
+
+CREATE DATABASE IF NOT EXISTS isolation_levels;
+USE isolation_levels;
+----
+
+==== Demonstrating Dirty Reads
+
+To demonstrate dirty reads, we need to set the isolation level to READ UNCOMMITTED:
+
+.Session 1
+[source,sql]
+----
+-- Start a new session and set isolation level
+SET SESSION TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+START TRANSACTION;
+
+-- Check initial balance
+SELECT * FROM accounts WHERE account_number = 'ACC001';
+----
+
+.Session 2
+[source,sql]
+----
+-- Start another session
+START TRANSACTION;
+
+-- Update the balance but don't commit yet
+UPDATE accounts SET balance = balance + 500 WHERE account_number = 'ACC001';
+
+-- Don't commit yet!
+----
+
+.Session 1 (continued)
+[source,sql]
+----
+-- Read the balance again - will see the uncommitted change (dirty read)
+SELECT * FROM accounts WHERE account_number = 'ACC001';
+----
+
+.Session 2 (continued)
+[source,sql]
+----
+-- Now rollback the transaction
+ROLLBACK;
+----
+
+.Session 1 (continued)
+[source,sql]
+----
+-- Read again - the balance is back to the original value
+SELECT * FROM accounts WHERE account_number = 'ACC001';
+
+-- End transaction
+COMMIT;
+----
+
+In this example, Session 1 reads a value that was modified but not committed by Session 2. When Session 2 rolls back, the value read by Session 1 becomes invalid - this is a dirty read.
+
+==== Demonstrating Non-repeatable Reads
+
+To demonstrate non-repeatable reads, we'll use READ COMMITTED isolation level:
+
+.Session 1
+[source,sql]
+----
+-- Set isolation level
+SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED;
+START TRANSACTION;
+
+-- Read the balance
+SELECT * FROM accounts WHERE account_number = 'ACC001';
+----
+
+.Session 2
+[source,sql]
+----
+-- Start another session
+START TRANSACTION;
+
+-- Update the balance
+UPDATE accounts SET balance = balance + 1000 WHERE account_number = 'ACC001';
+
+-- Commit the change
+COMMIT;
+----
+
+.Session 1 (continued)
+[source,sql]
+----
+-- Read the balance again - will see the committed change (non-repeatable read)
+SELECT * FROM accounts WHERE account_number = 'ACC001';
+
+-- End transaction
+COMMIT;
+----
+
+In this example, Session 1 reads the same row twice but gets different values because Session 2 committed a change in between the reads.
+
+==== Demonstrating Phantom Reads
+
+To demonstrate phantom reads, we'll use REPEATABLE READ isolation level:
+
+.Session 1
+[source,sql]
+----
+-- Set isolation level
+SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+START TRANSACTION;
+
+-- Read accounts with balance > 1000
+SELECT * FROM accounts WHERE balance > 1000;
+----
+
+.Session 2
+[source,sql]
+----
+-- Start another session
+START TRANSACTION;
+
+-- Insert a new account with balance > 1000
+INSERT INTO accounts (account_number, owner_name, balance) 
+VALUES ('ACC004', 'New User', 5000);
+
+-- Commit the change
+COMMIT;
+----
+
+.Session 1 (continued)
+[source,sql]
+----
+-- Read accounts with balance > 1000 again
+-- In REPEATABLE READ, you won't see the new account (no phantom read)
+SELECT * FROM accounts WHERE balance > 1000;
+
+-- But if you explicitly request fresh data with a new transaction:
+COMMIT;
+START TRANSACTION;
+SELECT * FROM accounts WHERE balance > 1000;
+-- Now you'll see the new account
+
+-- End transaction
+COMMIT;
+----
+
+In REPEATABLE READ isolation level, MySQL prevents phantom reads within the same transaction. However, if you start a new transaction, you'll see the new data.
+
+==== Preventing All Anomalies with SERIALIZABLE
+
+To prevent all anomalies, we can use SERIALIZABLE isolation level:
+
+.Session 1
+[source,sql]
+----
+-- Set isolation level
+SET SESSION TRANSACTION ISOLATION LEVEL SERIALIZABLE;
+START TRANSACTION;
+
+-- Read accounts with balance > 1000
+SELECT * FROM accounts WHERE balance > 1000;
+----
+
+.Session 2
+[source,sql]
+----
+-- Start another session with SERIALIZABLE
+SET SESSION TRANSACTION ISOLATION LEVEL SERIALIZABLE;
+START TRANSACTION;
+
+-- Try to insert a new account (this will wait for Session 1 to complete)
+INSERT INTO accounts (account_number, owner_name, balance) 
+VALUES ('ACC005', 'Another User', 6000);
+
+-- This won't complete until Session 1 commits or rolls back
+----
+
+.Session 1 (continued)
+[source,sql]
+----
+-- Read accounts with balance > 1000 again
+-- You won't see any changes
+SELECT * FROM accounts WHERE balance > 1000;
+
+-- End transaction
+COMMIT;
+----
+
+.Session 2 (continued)
+[source,sql]
+----
+-- Now the insert will complete
+COMMIT;
+----
+
+In SERIALIZABLE isolation level, transactions are completely isolated from each other, preventing all anomalies but potentially reducing concurrency.
+
+== Spring Transaction Management
+
+Spring provides a comprehensive transaction management framework that simplifies working with transactions in Java applications. Let's explore how Spring manages transactions and how to configure different isolation levels.
+
+=== Spring Transaction Annotations
+
+Spring's transaction management is primarily annotation-based, with `@Transactional` being the most important annotation:
+
+[source,java]
+----
+@Transactional(isolation = Isolation.READ_COMMITTED)
+public void transferMoney(String fromAccount, String toAccount, BigDecimal amount) {
+    // Transaction logic here
+}
+----
+
+The `@Transactional` annotation can be applied at both class and method levels, with method-level annotations overriding class-level ones.
+
+=== Key Transaction Attributes
+
+Spring's `@Transactional` annotation supports several attributes:
+
+* `isolation`: Sets the transaction isolation level
+* `propagation`: Defines how transactions relate to each other
+* `timeout`: Specifies how long the transaction may run before timing out
+* `readOnly`: Optimizes for read-only operations
+* `rollbackFor`/`noRollbackFor`: Specifies which exceptions should cause a rollback
+
+=== Configuring Transaction Isolation Levels
+
+Here's how to configure different isolation levels in Spring:
+
+[source,java]
+----
+// READ UNCOMMITTED - allows dirty reads
+@Transactional(isolation = Isolation.READ_UNCOMMITTED)
+public Account getAccountReadUncommitted(String accountNumber) {
+    return accountRepository.findByAccountNumber(accountNumber);
+}
+
+// READ COMMITTED - prevents dirty reads
+@Transactional(isolation = Isolation.READ_COMMITTED)
+public Account getAccountReadCommitted(String accountNumber) {
+    return accountRepository.findByAccountNumber(accountNumber);
+}
+
+// REPEATABLE READ - prevents dirty and non-repeatable reads
+@Transactional(isolation = Isolation.REPEATABLE_READ)
+public Account getAccountRepeatableRead(String accountNumber) {
+    return accountRepository.findByAccountNumber(accountNumber);
+}
+
+// SERIALIZABLE - prevents all anomalies
+@Transactional(isolation = Isolation.SERIALIZABLE)
+public Account getAccountSerializable(String accountNumber) {
+    return accountRepository.findByAccountNumber(accountNumber);
+}
+----
+
+=== Transaction Propagation
+
+Transaction propagation defines how transactions relate to each other when methods are called within a transaction context:
+
+[source,java]
+----
+// REQUIRED - Uses existing transaction or creates a new one
+@Transactional(propagation = Propagation.REQUIRED)
+public void methodA() {
+    // Transaction logic
+    methodB(); // Will use the same transaction
+}
+
+// REQUIRES_NEW - Always creates a new transaction
+@Transactional(propagation = Propagation.REQUIRES_NEW)
+public void methodB() {
+    // Always runs in a new transaction
+}
+----
+
+=== Programmatic Transaction Management
+
+In addition to annotations, Spring also supports programmatic transaction management:
+
+[source,java]
+----
+@Autowired
+private PlatformTransactionManager transactionManager;
+
+public void complexTransactionLogic() {
+    TransactionTemplate template = new TransactionTemplate(transactionManager);
+    template.setIsolationLevel(TransactionDefinition.ISOLATION_SERIALIZABLE);
+    
+    template.execute(status -> {
+        // Transaction logic here
+        return null;
+    });
+}
+----
+
+=== Handling Transaction Exceptions
+
+Spring provides a rich exception hierarchy for transaction management:
+
+[source,java]
+----
+@Transactional
+public void transferWithExceptionHandling(String fromAccount, String toAccount, BigDecimal amount) {
+    try {
+        // Transaction logic
+    } catch (DataAccessException e) {
+        // Handle database-related exceptions
+        throw new ServiceException("Database error during transfer", e);
+    } catch (Exception e) {
+        // Handle other exceptions
+        throw new ServiceException("Error during transfer", e);
+    }
+}
+----
+
+=== Optimistic vs. Pessimistic Locking
+
+Spring Data JPA supports both optimistic and pessimistic locking:
+
+==== Optimistic Locking
+
+Optimistic locking uses a version field to detect conflicts:
+
+[source,java]
+----
+@Entity
+public class Account {
+    // Other fields
+    
+    @Version
+    private Long version;
+    
+    // Getters and setters
+}
+----
+
+==== Pessimistic Locking
+
+Pessimistic locking acquires database locks:
+
+[source,java]
+----
+@Lock(LockModeType.PESSIMISTIC_WRITE)
+@Query("SELECT a FROM Account a WHERE a.id = :id")
+Optional<Account> findByIdWithPessimisticLock(@Param("id") Long id);
+----
+
+== Conclusion and Optimistic Concurrency Control
+
+=== Summary of Isolation Levels
+
+We've explored the four standard transaction isolation levels and how they prevent different anomalies:
+
+* READ UNCOMMITTED: Allows all anomalies but provides maximum concurrency
+* READ COMMITTED: Prevents dirty reads but allows non-repeatable and phantom reads
+* REPEATABLE READ: Prevents dirty and non-repeatable reads but allows phantom reads
+* SERIALIZABLE: Prevents all anomalies but reduces concurrency
+
+=== Optimistic Concurrency Control (OCC)
+
+Optimistic Concurrency Control is an alternative approach to managing concurrent access to data:
+
+* Instead of locking resources, OCC assumes conflicts are rare
+* It uses version numbers or timestamps to detect conflicts
+* If a conflict is detected during commit, the transaction is rolled back and can be retried
+* OCC is particularly useful in high-concurrency, low-conflict scenarios
+
+==== Implementing OCC in Spring
+
+Spring Data JPA makes implementing OCC easy with the `@Version` annotation:
+
+[source,java]
+----
+@Entity
+public class Account {
+    @Id
+    @GeneratedValue
+    private Long id;
+    
+    private String accountNumber;
+    private BigDecimal balance;
+    
+    @Version
+    private Long version;
+    
+    // Getters and setters
+}
+----
+
+When multiple transactions try to update the same entity concurrently, Spring will throw an `OptimisticLockingFailureException` if a conflict is detected.
+
+==== Handling OCC Conflicts
+
+To handle OCC conflicts, you can catch and handle the exception:
+
+[source,java]
+----
+@Service
+public class AccountService {
+    @Autowired
+    private AccountRepository repository;
+    
+    @Transactional
+    public void updateBalanceWithRetry(Long accountId, BigDecimal newBalance, int maxRetries) {
+        int retries = 0;
+        while (retries < maxRetries) {
+            try {
+                Account account = repository.findById(accountId).orElseThrow();
+                account.setBalance(newBalance);
+                repository.save(account);
+                return; // Success
+            } catch (OptimisticLockingFailureException e) {
+                retries++;
+                if (retries >= maxRetries) {
+                    throw new ServiceException("Failed to update after " + maxRetries + " attempts");
+                }
+                // Wait before retrying
+                try {
+                    Thread.sleep(100);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+        }
+    }
+}
+----
+
+=== Choosing the Right Approach
+
+When deciding between isolation levels and concurrency control mechanisms:
+
+* Consider your application's requirements for data consistency
+* Evaluate the performance impact of different isolation levels
+* Analyze the likelihood of conflicts in your application
+* Test thoroughly under realistic concurrent loads
+
+The right choice depends on your specific use case, but understanding these concepts will help you make informed decisions.
+
+== Building and Running the Application
+
+=== Prerequisites
+
+* Java 17 or higher
+* Maven 3.6 or higher
+* MySQL 8.0 or higher
+
+=== Database Setup
+
+Create the database and user:
+
+[source,sql]
+----
+CREATE DATABASE isolation_levels;
+CREATE USER 'junie'@'localhost' IDENTIFIED BY 'junie';
+GRANT ALL PRIVILEGES ON isolation_levels.* TO 'junie'@'localhost';
+FLUSH PRIVILEGES;
+----
+
+=== Building the Application
+
+[source,bash]
+----
+# Clone the repository
+git clone https://github.com/jetbrains/isolation-levels-demo.git
+cd isolation-levels-demo
+
+# Build the application
+mvn clean package
+----
+
+=== Running the Application
+
+[source,bash]
+----
+# Run the application
+java -jar target/isolation_levels-1.0-SNAPSHOT.jar
+----
+
+The application will start on port 8080 and automatically create the necessary tables and sample data.
+
+=== API Endpoints
+
+The application provides several REST endpoints to demonstrate transaction isolation levels:
+
+* `GET /api/accounts`: Get all accounts
+* `GET /api/accounts/{accountNumber}?isolationLevel=READ_COMMITTED`: Get an account with specified isolation level
+* `PUT /api/accounts/{accountNumber}/balance`: Update an account's balance
+* `POST /api/transactions/transfer`: Transfer money between accounts
+
+=== Example API Calls
+
+[source,bash]
+----
+# Get all accounts
+curl -X GET http://localhost:8080/api/accounts
+
+# Get an account with READ_UNCOMMITTED isolation level
+curl -X GET "http://localhost:8080/api/accounts/ACC001?isolationLevel=READ_UNCOMMITTED"
+
+# Update an account's balance
+curl -X PUT http://localhost:8080/api/accounts/ACC001/balance \
+  -H "Content-Type: application/json" \
+  -d '{"balance": "1500.00"}'
+
+# Transfer money between accounts
+curl -X POST http://localhost:8080/api/transactions/transfer \
+  -H "Content-Type: application/json" \
+  -d '{"fromAccountNumber": "ACC001", "toAccountNumber": "ACC002", "amount": "500.00"}'
+----
+
+== Conclusion
+
+Understanding transaction isolation levels is crucial for developing robust database applications. By choosing the appropriate isolation level, you can balance data consistency with performance requirements.
+
+Spring's transaction management framework provides a powerful and flexible way to implement transactions in Java applications, with support for different isolation levels, propagation behaviors, and concurrency control mechanisms.
+
+Whether you choose traditional isolation levels or optimistic concurrency control, the key is to understand the trade-offs and select the approach that best fits your application's needs.
