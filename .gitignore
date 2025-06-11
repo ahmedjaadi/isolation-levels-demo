@@ -65,3 +65,7 @@ build/
 
 # Mac OS
 .DS_Store
+
+# Generated files from README.adoc
+!README.adoc
+README.*
