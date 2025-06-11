@@ -23,6 +23,33 @@ In this article, we'll explore transaction isolation levels in detail, focusing 
 
 We'll use a banking application as our example, demonstrating how transaction isolation levels affect operations like account balance updates and money transfers. You'll be able to follow along with practical examples using MySQL and a Spring Boot application.
 
+=== Understanding the Banking Scenario
+
+Our example application models a simple banking system where:
+
+* Each customer has one or more bank accounts
+* Accounts can have deposits and withdrawals (transactions)
+* Money can be transferred between accounts
+* Multiple users might access the same account simultaneously
+
+This scenario is perfect for demonstrating transaction isolation issues because:
+
+1. Banking operations require strict data consistency (you don't want money to disappear or be created)
+2. Concurrent access is common (multiple systems might access the same account)
+3. Different operations have different isolation requirements (reading an account balance vs. transferring money)
+
+In our model, we have two main entities:
+
+* `Account`: Represents a bank account with properties like account number, owner name, and balance
+* `Transaction`: Represents money movement (deposits, withdrawals, transfers) with properties like amount, type, and timestamp
+
+Without proper transaction isolation, this banking system could face serious issues like:
+- Showing incorrect balances (dirty reads)
+- Processing transfers based on outdated balances (non-repeatable reads)
+- Missing new accounts in reports (phantom reads)
+
+Let's explore how different isolation levels help prevent these problems.
+
 == Transaction Isolation Levels Explained
 
 === Understanding Transaction Anomalies
@@ -89,6 +116,38 @@ Enter password: junie
 
 CREATE DATABASE IF NOT EXISTS isolation_levels;
 USE isolation_levels;
+
+-- Create the accounts table
+CREATE TABLE accounts (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    account_number VARCHAR(50) NOT NULL UNIQUE,
+    owner_name VARCHAR(100) NOT NULL,
+    balance DECIMAL(10, 2) NOT NULL,
+    version BIGINT DEFAULT 0
+);
+
+-- Create the transactions table
+CREATE TABLE transactions (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    account_id BIGINT NOT NULL,
+    amount DECIMAL(10, 2) NOT NULL,
+    description VARCHAR(255) NOT NULL,
+    timestamp DATETIME NOT NULL,
+    type VARCHAR(10) NOT NULL,
+    FOREIGN KEY (account_id) REFERENCES accounts(id)
+);
+
+-- Insert sample accounts
+INSERT INTO accounts (account_number, owner_name, balance) VALUES
+('ACC001', 'John Doe', 1000.00),
+('ACC002', 'Jane Smith', 2000.00);
+
+-- Insert sample transactions
+INSERT INTO transactions (account_id, amount, description, timestamp, type) VALUES
+((SELECT id FROM accounts WHERE account_number = 'ACC001'), 500.00, 'Initial deposit', NOW(), 'CREDIT'),
+((SELECT id FROM accounts WHERE account_number = 'ACC001'), 200.00, 'ATM withdrawal', NOW(), 'DEBIT'),
+((SELECT id FROM accounts WHERE account_number = 'ACC002'), 1000.00, 'Salary deposit', NOW(), 'CREDIT'),
+((SELECT id FROM accounts WHERE account_number = 'ACC002'), 300.00, 'Bill payment', NOW(), 'DEBIT');
 ----
 
 ==== Demonstrating Dirty Reads
@@ -144,6 +203,8 @@ COMMIT;
 
 In this example, Session 1 reads a value that was modified but not committed by Session 2. When Session 2 rolls back, the value read by Session 1 becomes invalid - this is a dirty read.
 
+This problem is resolved by moving to the next isolation level: READ COMMITTED. By using READ COMMITTED isolation level, transactions will only see data that has been committed by other transactions, preventing dirty reads entirely.
+
 ==== Demonstrating Non-repeatable Reads
 
 To demonstrate non-repeatable reads, we'll use READ COMMITTED isolation level:
@@ -182,7 +243,9 @@ SELECT * FROM accounts WHERE account_number = 'ACC001';
 COMMIT;
 ----
 
-In this example, Session 1 reads the same row twice but gets different values because Session 2 committed a change in between the reads.
+In this example, Session 1 reads the same row twice but gets different values because Session 2 committed a change in between the reads. This is a non-repeatable read, which can lead to inconsistent data processing within a single transaction.
+
+This problem is resolved by moving to the next isolation level: REPEATABLE READ. By using REPEATABLE READ isolation level, transactions will see a consistent snapshot of the data as it was at the beginning of the transaction, ensuring that repeated reads of the same data will yield the same results throughout the transaction.
 
 ==== Demonstrating Phantom Reads
 
@@ -230,7 +293,9 @@ SELECT * FROM accounts WHERE balance > 1000;
 COMMIT;
 ----
 
-In REPEATABLE READ isolation level, MySQL prevents phantom reads within the same transaction. However, if you start a new transaction, you'll see the new data.
+In REPEATABLE READ isolation level, MySQL prevents phantom reads within the same transaction for most operations. However, there are edge cases where phantom reads can still occur, particularly with range queries and inserts. Also, if you start a new transaction, you'll see the new data.
+
+While REPEATABLE READ in MySQL provides strong protection against phantom reads (better than the SQL standard requires), the only isolation level that fully guarantees protection against phantom reads in all database systems is SERIALIZABLE.
 
 ==== Preventing All Anomalies with SERIALIZABLE
 
@@ -279,15 +344,70 @@ COMMIT;
 COMMIT;
 ----
 
-In SERIALIZABLE isolation level, transactions are completely isolated from each other, preventing all anomalies but potentially reducing concurrency.
+In SERIALIZABLE isolation level, transactions are completely isolated from each other, preventing all anomalies but potentially reducing concurrency. SERIALIZABLE achieves this by effectively making transactions run one after another (serially) rather than concurrently when they might conflict.
+
+The key differences between REPEATABLE READ and SERIALIZABLE are:
+
+1. REPEATABLE READ allows transactions to execute concurrently even when they might conflict, but takes snapshots to ensure consistent reads
+2. SERIALIZABLE detects potential conflicts and forces transactions to wait, ensuring complete isolation
+3. REPEATABLE READ may allow phantom reads in some edge cases (especially in databases other than MySQL)
+4. SERIALIZABLE guarantees no phantom reads under any circumstances
+
+=== Choosing the Right Isolation Level: Performance vs. Consistency
+
+Each isolation level represents a trade-off between data consistency and performance:
+
+==== READ UNCOMMITTED
+* *Performance Impact*: Minimal - highest throughput of all isolation levels
+* *When to Use*: Rarely used in production; might be suitable for reporting queries where approximate results are acceptable
+* *Risks*: High risk of inconsistent data due to dirty reads
+
+==== READ COMMITTED
+* *Performance Impact*: Low - good performance with reasonable consistency
+* *When to Use*: General-purpose operations where dirty reads must be avoided but some inconsistency is tolerable
+* *Risks*: Non-repeatable reads and phantom reads can still occur
+* *Common Use Cases*: Reading account information, generating non-critical reports
+
+==== REPEATABLE READ
+* *Performance Impact*: Moderate - some overhead for maintaining read consistency
+* *When to Use*: When consistent reads within a transaction are important
+* *Risks*: Potential for phantom reads in some database systems (less so in MySQL)
+* *Common Use Cases*: Financial calculations, balance transfers where consistent reads are critical
+
+==== SERIALIZABLE
+* *Performance Impact*: High - significant reduction in concurrency
+* *When to Use*: When absolute data consistency is required, even at the cost of performance
+* *Risks*: Deadlocks and timeouts more likely; reduced throughput under high concurrency
+* *Common Use Cases*: Critical financial transactions, regulatory compliance scenarios
+
+In our banking application example, you might use different isolation levels for different operations:
+- READ COMMITTED for viewing account details
+- REPEATABLE READ for calculating interest
+- SERIALIZABLE for executing money transfers between accounts
+
+=== Cleaning Up the Database
+
+Before moving on to the next section, let's clean up our database by dropping the tables we created:
+
+[source,sql]
+----
+-- Drop tables (transactions first due to foreign key constraint)
+DROP TABLE IF EXISTS transactions;
+DROP TABLE IF EXISTS accounts;
+
+-- Verify tables are gone
+SHOW TABLES;
+----
+
+This ensures we start with a clean slate for the Spring application in the next section.
 
 == Spring Transaction Management
 
 Spring provides a comprehensive transaction management framework that simplifies working with transactions in Java applications. Let's explore how Spring manages transactions and how to configure different isolation levels.
 
-=== Spring Transaction Annotations
+=== Spring Transaction Annotations and How They Work
 
-Spring's transaction management is primarily annotation-based, with `@Transactional` being the most important annotation:
+Spring's transaction management is primarily annotation-based, with `@Transactional` being the most important annotation. When you annotate a method with `@Transactional`, Spring creates a proxy around your object that intercepts calls to the annotated methods:
 
 [source,java]
 ----
@@ -297,17 +417,32 @@ public void transferMoney(String fromAccount, String toAccount, BigDecimal amoun
 }
 ----
 
-The `@Transactional` annotation can be applied at both class and method levels, with method-level annotations overriding class-level ones.
+When a client calls this method, here's what happens behind the scenes:
+
+1. The proxy intercepts the method call
+2. The proxy starts a new transaction (or joins an existing one, depending on the propagation setting)
+3. The proxy sets the appropriate isolation level, timeout, and read-only attributes
+4. The proxy invokes the actual method
+5. If the method completes normally, the proxy commits the transaction
+6. If the method throws an exception, the proxy may roll back the transaction (depending on the exception type and rollback settings)
+
+This declarative approach means you don't need to write explicit transaction management code in your business methods. Spring handles all the transaction boundaries, commit, and rollback operations automatically.
+
+The `@Transactional` annotation can be applied at both class and method levels, with method-level annotations overriding class-level ones. This allows you to set default transaction behavior for all methods in a class while customizing specific methods as needed.
 
 === Key Transaction Attributes
 
-Spring's `@Transactional` annotation supports several attributes:
+Spring's `@Transactional` annotation supports several attributes that give you fine-grained control over transaction behavior:
 
-* `isolation`: Sets the transaction isolation level
-* `propagation`: Defines how transactions relate to each other
-* `timeout`: Specifies how long the transaction may run before timing out
-* `readOnly`: Optimizes for read-only operations
-* `rollbackFor`/`noRollbackFor`: Specifies which exceptions should cause a rollback
+The `isolation` attribute sets the transaction isolation level for the method. As we've discussed earlier, this determines how the transaction interacts with other concurrent transactions. For example, setting `isolation = Isolation.SERIALIZABLE` ensures the highest level of isolation but may impact performance under high concurrency.
+
+The `propagation` attribute defines how transactions relate to each other when methods call other methods. The default value, `Propagation.REQUIRED`, means that the method will use an existing transaction if one exists, or create a new one if none exists. Other options like `Propagation.REQUIRES_NEW` always create a new transaction, suspending any existing one.
+
+The `timeout` attribute specifies how long (in seconds) the transaction may run before timing out. This is useful for preventing long-running transactions from holding locks for extended periods. If a transaction exceeds this time limit, Spring will automatically roll it back.
+
+The `readOnly` attribute is a hint to the transaction infrastructure that the transaction will not modify any data. This can enable optimizations in some databases and ORM frameworks. For example, Hibernate can skip dirty checking for read-only transactions, improving performance.
+
+The `rollbackFor` and `noRollbackFor` attributes allow you to specify which exceptions should cause a transaction to roll back or not roll back. By default, runtime exceptions trigger a rollback while checked exceptions do not. These attributes let you customize this behavior for specific exception types.
 
 === Configuring Transaction Isolation Levels
 
@@ -372,7 +507,7 @@ private PlatformTransactionManager transactionManager;
 public void complexTransactionLogic() {
     TransactionTemplate template = new TransactionTemplate(transactionManager);
     template.setIsolationLevel(TransactionDefinition.ISOLATION_SERIALIZABLE);
-    
+
     template.execute(status -> {
         // Transaction logic here
         return null;
@@ -402,55 +537,113 @@ public void transferWithExceptionHandling(String fromAccount, String toAccount, 
 
 === Optimistic vs. Pessimistic Locking
 
-Spring Data JPA supports both optimistic and pessimistic locking:
+Beyond isolation levels, Spring Data JPA provides two additional concurrency control mechanisms: optimistic and pessimistic locking. These approaches address the fundamental problem of concurrent data access from different perspectives.
 
-==== Optimistic Locking
+==== Optimistic Locking: Trust but Verify
 
-Optimistic locking uses a version field to detect conflicts:
+Optimistic locking operates on the assumption that conflicts are rare. Rather than locking resources preemptively, it allows multiple transactions to proceed simultaneously and checks for conflicts only at commit time. This approach is called "optimistic" because it optimistically assumes that most transactions won't conflict.
+
+Here's how optimistic locking works in Spring Data JPA:
+
+1. A version field is added to the entity class
+2. When an entity is read, its current version is recorded
+3. When an entity is updated, the version is checked against the database
+4. If the version matches, the update proceeds and the version is incremented
+5. If the version doesn't match, an OptimisticLockingFailureException is thrown
 
 [source,java]
 ----
 @Entity
 public class Account {
-    // Other fields
-    
+    @Id
+    @GeneratedValue
+    private Long id;
+
+    private String accountNumber;
+    private BigDecimal balance;
+
     @Version
-    private Long version;
-    
+    private Long version; // This field enables optimistic locking
+
     // Getters and setters
 }
 ----
 
-==== Pessimistic Locking
+Optimistic locking is particularly well-suited for:
+- High-read, low-write scenarios
+- Applications where conflicts are infrequent
+- User interfaces that can handle conflict resolution (e.g., by showing a "someone else has modified this data" message)
+- Environments where holding database locks for extended periods is problematic
 
-Pessimistic locking acquires database locks:
+==== Pessimistic Locking: Lock First, Ask Questions Later
+
+Pessimistic locking takes the opposite approach: it assumes conflicts are likely and prevents them by acquiring locks on resources before they're accessed. This approach is "pessimistic" because it assumes the worst-case scenario and takes preventive measures.
+
+Spring Data JPA supports several types of pessimistic locks:
+
+1. *PESSIMISTIC_READ*: Acquires a shared lock that prevents other transactions from updating or deleting the data but allows them to read it
+2. *PESSIMISTIC_WRITE*: Acquires an exclusive lock that prevents other transactions from reading, updating, or deleting the data
+3. *PESSIMISTIC_FORCE_INCREMENT*: Similar to PESSIMISTIC_WRITE but also increments the version field
+
+Here's how to use pessimistic locking in a repository:
 
 [source,java]
 ----
-@Lock(LockModeType.PESSIMISTIC_WRITE)
-@Query("SELECT a FROM Account a WHERE a.id = :id")
-Optional<Account> findByIdWithPessimisticLock(@Param("id") Long id);
+public interface AccountRepository extends JpaRepository<Account, Long> {
+    // Acquire a pessimistic write lock when finding an account
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT a FROM Account a WHERE a.accountNumber = :accountNumber")
+    Optional<Account> findByAccountNumberWithPessimisticLock(@Param("accountNumber") String accountNumber);
+
+    // Acquire a pessimistic read lock
+    @Lock(LockModeType.PESSIMISTIC_READ)
+    @Query("SELECT a FROM Account a WHERE a.id = :id")
+    Optional<Account> findByIdWithPessimisticReadLock(@Param("id") Long id);
+}
 ----
+
+Pessimistic locking is well-suited for:
+- High-contention scenarios where conflicts are frequent
+- Critical operations where conflicts must be prevented rather than resolved
+- Short-lived transactions where lock holding time is minimal
+- Situations where the cost of conflict resolution is higher than the cost of locking
+
+==== Choosing Between Optimistic and Pessimistic Locking
+
+The choice between optimistic and pessimistic locking depends on your application's characteristics:
+
+- *Optimistic locking* provides better concurrency and scalability but requires conflict resolution logic
+- *Pessimistic locking* prevents conflicts but reduces concurrency and can lead to deadlocks
+
+In our banking application example, you might use:
+- Optimistic locking for updating customer information or account settings
+- Pessimistic locking for critical operations like money transfers or balance updates
 
 == Conclusion and Optimistic Concurrency Control
 
 === Summary of Isolation Levels
 
-We've explored the four standard transaction isolation levels and how they prevent different anomalies:
+Throughout this article, we've explored the four standard transaction isolation levels and their characteristics. Let's summarize what we've learned:
 
-* READ UNCOMMITTED: Allows all anomalies but provides maximum concurrency
-* READ COMMITTED: Prevents dirty reads but allows non-repeatable and phantom reads
-* REPEATABLE READ: Prevents dirty and non-repeatable reads but allows phantom reads
-* SERIALIZABLE: Prevents all anomalies but reduces concurrency
+READ UNCOMMITTED is the lowest isolation level, allowing all types of anomalies (dirty reads, non-repeatable reads, and phantom reads) to occur. While it provides maximum concurrency and performance, it does so at the cost of data consistency. In our banking application, this level would be too risky for most operations as it could lead to incorrect balance calculations or duplicate transfers.
+
+READ COMMITTED prevents dirty reads by ensuring that transactions only see committed data from other transactions. This provides a reasonable balance between performance and consistency for many applications. However, it still allows non-repeatable reads and phantom reads, which can be problematic for complex financial calculations or reports that need consistent data throughout a transaction.
+
+REPEATABLE READ addresses the non-repeatable read issue by ensuring that if a transaction reads a row once, it will get the same data if it reads that row again, regardless of changes made by other transactions. This is achieved by taking a snapshot of the data at the beginning of the transaction. While this level prevents both dirty reads and non-repeatable reads, it may still allow phantom reads in some database systems (though MySQL's implementation provides stronger guarantees).
+
+SERIALIZABLE, the highest isolation level, prevents all types of anomalies by essentially making transactions run one after another when they might conflict. This provides the strongest consistency guarantees but at the cost of reduced concurrency and potential performance issues under high load. In our banking application, we might reserve this level for the most critical operations like large money transfers or end-of-day reconciliation processes.
 
 === Optimistic Concurrency Control (OCC)
 
-Optimistic Concurrency Control is an alternative approach to managing concurrent access to data:
+Optimistic Concurrency Control represents a fundamentally different approach to managing concurrent access to data compared to traditional isolation levels. While isolation levels focus on controlling how transactions interact with each other through database mechanisms, OCC takes a more application-centric approach.
 
-* Instead of locking resources, OCC assumes conflicts are rare
-* It uses version numbers or timestamps to detect conflicts
-* If a conflict is detected during commit, the transaction is rolled back and can be retried
-* OCC is particularly useful in high-concurrency, low-conflict scenarios
+At its core, OCC operates on the principle that conflicts between concurrent transactions are relatively rare in most applications. Instead of preventing conflicts through locks or isolation mechanisms, OCC allows transactions to proceed without restrictions but verifies at commit time that no conflicts have occurred.
+
+This approach works by tracking the state of data when it's read and then checking whether that state has changed when the transaction attempts to commit. If the data hasn't changed, the commit succeeds; if it has changed, the transaction is rolled back and can be retried.
+
+The primary advantage of OCC is that it allows for high concurrency without the overhead of maintaining locks or complex isolation mechanisms. This makes it particularly well-suited for modern web applications with many users but relatively few conflicts over the same data.
+
+In our banking application, OCC might be used for operations like updating account settings or personal information, where conflicts are unlikely but still need to be handled correctly if they occur. For example, if two bank employees try to update a customer's address simultaneously, OCC would allow both operations to proceed but ensure that the second update doesn't accidentally overwrite the first one without acknowledging the conflict.
 
 ==== Implementing OCC in Spring
 
@@ -463,13 +656,13 @@ public class Account {
     @Id
     @GeneratedValue
     private Long id;
-    
+
     private String accountNumber;
     private BigDecimal balance;
-    
+
     @Version
     private Long version;
-    
+
     // Getters and setters
 }
 ----
@@ -486,7 +679,7 @@ To handle OCC conflicts, you can catch and handle the exception:
 public class AccountService {
     @Autowired
     private AccountRepository repository;
-    
+
     @Transactional
     public void updateBalanceWithRetry(Long accountId, BigDecimal newBalance, int maxRetries) {
         int retries = 0;
@@ -515,14 +708,24 @@ public class AccountService {
 
 === Choosing the Right Approach
 
-When deciding between isolation levels and concurrency control mechanisms:
+Selecting the appropriate concurrency control strategy for your application requires careful consideration of several factors. There's no one-size-fits-all solution, and the best approach often involves using different strategies for different parts of your application.
 
-* Consider your application's requirements for data consistency
-* Evaluate the performance impact of different isolation levels
-* Analyze the likelihood of conflicts in your application
-* Test thoroughly under realistic concurrent loads
+First, assess your application's requirements for data consistency. Some operations, like viewing account balances, might tolerate slight inconsistencies, while others, like executing financial transactions, require absolute consistency. Map these requirements to the appropriate isolation levels or concurrency control mechanisms.
 
-The right choice depends on your specific use case, but understanding these concepts will help you make informed decisions.
+Next, evaluate the performance implications of your choices. Higher isolation levels and pessimistic locking provide stronger consistency guarantees but can significantly impact performance under high concurrency. Consider whether your application can handle the potential performance overhead or if a more optimistic approach would be better.
+
+The nature of your data access patterns also plays a crucial role. Analyze the likelihood of conflicts in your application by considering questions like: How often will multiple users try to update the same data simultaneously? Are certain entities more contended than others? This analysis will help you decide between optimistic and pessimistic approaches.
+
+Finally, there's no substitute for thorough testing under realistic concurrent loads. Theoretical understanding is important, but real-world behavior can sometimes be surprising. Set up test scenarios that mimic your expected production load and verify that your chosen approach maintains both consistency and acceptable performance.
+
+In our banking application example, we might use a mixed approach:
+- READ COMMITTED isolation for general account viewing
+- REPEATABLE READ for generating financial reports
+- SERIALIZABLE for critical money transfers
+- Optimistic locking for customer profile updates
+- Pessimistic locking for balance updates
+
+By understanding the trade-offs between different concurrency control approaches and carefully matching them to your application's needs, you can build systems that are both consistent and performant.
 
 == Building and Running the Application
 
