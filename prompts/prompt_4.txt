@@ -1,0 +1,7 @@
+Run the AccountServiceTest test suite to identify and resolve failing test cases. Please analyze each failing test, determine the root cause of the failures, and implement the necessary fixes to ensure all tests pass successfully. Focus on:
+
+1. Execute all tests in AccountServiceTest suite
+2. Identify specific failing test cases
+3. Analyze the cause of test failures
+4. Implement required fixes
+5. Verify tests pass after fixes

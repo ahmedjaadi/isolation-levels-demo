@@ -1,0 +1,9 @@
+I see a number of issues in the article, you need to address:
+1. You didn't take time to explain the Business Problem, i.e., the bank scenario with banks and accounts
+2. When you move from one anomaly to another, you don't clearly state that the previous anomaly is resolved by the next isolation level; For example, from the dirty read part, you don't say the dirty read is resolved by at least setting the READ COMMITED isolation level.
+3. The reader will find it hard to differentiate between REPEATABLE READ and SERIALIZABLE, try your best to improve the explanation.
+4. Give more details about the isolation levels and when there's a need to use them, and what is their impact on performance.
+5. Add a bit more details about optimistic and pessimistic locking.
+6. Prefer passages to bullet points, whenever possible - for example, instead of having bullet points for the section 4.2, you can have one or more passages. This should give you the chance to talk more about the topic in question.
+7. Talk more about the @Transactional annotation, mention things like Spring will wrap the method call in a transaction and other relevant details; Assume the reader has just learned about the isolation levels doesn't know about the annotation.
+8. Under the Setting Up the Database section, create tables and insert data that are needed to make; the idea is to make the section 2 independent of section 3, so the reader would not have to run the Spring Boot application inorder to read the section 2. At the end of section 2 the isolation_levels schema should be cleared of any data and tables.

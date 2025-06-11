@@ -1,0 +1,26 @@
+Let us write a detailed article about Transaction Isolation levels in DBMS, first explain the anomalies that can happen without isolations, that is Dirty reads, non-repeatable reads and phantom reads.
+
+Then explain how these isolation levels resolve these anomalies.
+And you can end the article by briefly touching Optimistic Concurrency Control(OCC)
+
+The reader should be able to see these concepts in action, assume the reader will have multiple interactive shell sessions open, in the article you should provide commands required to demonstrate each concept, you can pick any hypothetical business problem that is relevant, and use it to demonstrate the concepts in the article.
+
+The article should have four sections
+
+1. Intro
+2. Detailed explanation of isolation levels. Shell and SQL commands required to connect to DB and demonstrate the concept, the explanation should be in a step-by-step manner, so the reader can practice each step of the way, for example to demonstrate dirty reads, you should tell the reader to open two MySQP sessions in two separate interactive shells, update the relevant data and and see the dirty reads in action. You can use the same technique to demonstrate other anomalies. Tell the reader to update the isolation level and prevent these anomalies.
+3. An explanation of the Spring application, how Spring manages transactions should be well explained here, with all relevant classes, methods and annotations.
+4. Outro: close the article and touch OCC
+
+You have access to a locally running MySQL instance listening to the default port, you can create any table you need and insert any data you need, these commands should be included in the article.
+These are details you will need to connect to DB
+User: junie
+Password junie
+Schema: isolation_levels
+No table is present in this schema.
+
+Use the latest stable Spring Boot version. Prefer Hibernate as the Persistence Provider. Write Javadocs to all important classes and methods. Write JUnit tests to cover all important test cases.
+
+The article README should be written in AsciiDoc. In the README file, take full credit, the reader should know the article was written by JetBrains Junie, outline every needed to compile, build and run the application locally.
+
+Create a git repository for the project and create a commit for each set of logical changes.

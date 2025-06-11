@@ -1,0 +1,15 @@
+The application currently exposes JPA entity objects directly through REST controllers, which creates several problems:
+1. Security concerns due to exposing internal data structure
+2. Tight coupling between API contract and database schema
+3. Performance issues with lazy loading
+4. Stack overflow errors due to circular references between Account and Transaction entities during JSON serialization
+
+To resolve these issues, Data Transfer Objects (DTOs) should be implemented to:
+- Create separate objects for API responses
+- Break circular dependencies
+- Control exactly what data is exposed to clients
+- Improve performance by fetching only necessary data
+
+Run the application and send sample requests and ensure the issue is resolved.
+
+
