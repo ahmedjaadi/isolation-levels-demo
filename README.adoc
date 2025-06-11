@@ -9,6 +9,12 @@
 
 v1.0, 2023-12-15
 
+[NOTE]
+====
+This project was created using JetBrains Junie with only 4 prompts,
+which are included in the git repository under the link:prompts[prompts] directory.
+====
+
 == Introduction
 
 Database transactions are a fundamental concept in database management systems (DBMS) that ensure data integrity and consistency. A transaction is a sequence of operations performed as a single logical unit of work. The ACID properties (Atomicity, Consistency, Isolation, Durability) govern database transactions, with Isolation being particularly important for concurrent operations.
