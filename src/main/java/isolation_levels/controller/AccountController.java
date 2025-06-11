@@ -1,5 +1,7 @@
 package isolation_levels.controller;
 
+import isolation_levels.dto.AccountDTO;
+import isolation_levels.mapper.EntityDTOMapper;
 import isolation_levels.model.Account;
 import isolation_levels.service.AccountService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -32,27 +34,27 @@ public class AccountController {
      * Creates a new account.
      *
      * @param requestBody the request body containing account details
-     * @return the created account
+     * @return the created account DTO
      */
     @PostMapping
-    public ResponseEntity<Account> createAccount(@RequestBody Map<String, String> requestBody) {
+    public ResponseEntity<AccountDTO> createAccount(@RequestBody Map<String, String> requestBody) {
         String accountNumber = requestBody.get("accountNumber");
         String ownerName = requestBody.get("ownerName");
         BigDecimal initialBalance = new BigDecimal(requestBody.get("initialBalance"));
-        
+
         Account account = accountService.createAccount(accountNumber, ownerName, initialBalance);
-        return ResponseEntity.ok(account);
+        return ResponseEntity.ok(EntityDTOMapper.toAccountDTO(account));
     }
 
     /**
      * Retrieves all accounts.
      *
-     * @return a list of all accounts
+     * @return a list of all account DTOs
      */
     @GetMapping
-    public ResponseEntity<List<Account>> getAllAccounts() {
+    public ResponseEntity<List<AccountDTO>> getAllAccounts() {
         List<Account> accounts = accountService.getAllAccounts();
-        return ResponseEntity.ok(accounts);
+        return ResponseEntity.ok(EntityDTOMapper.toAccountDTOs(accounts));
     }
 
     /**
@@ -60,15 +62,15 @@ public class AccountController {
      *
      * @param accountNumber the account number to search for
      * @param isolationLevel the isolation level to use (READ_UNCOMMITTED, READ_COMMITTED, REPEATABLE_READ, SERIALIZABLE)
-     * @return the account if found, or 404 if not found
+     * @return the account DTO if found, or 404 if not found
      */
     @GetMapping("/{accountNumber}")
-    public ResponseEntity<Account> getAccount(
+    public ResponseEntity<AccountDTO> getAccount(
             @PathVariable String accountNumber,
             @RequestParam(defaultValue = "READ_COMMITTED") String isolationLevel) {
-        
+
         Optional<Account> accountOpt;
-        
+
         switch (isolationLevel.toUpperCase()) {
             case "READ_UNCOMMITTED":
                 accountOpt = accountService.getAccountReadUncommitted(accountNumber);
@@ -85,8 +87,8 @@ public class AccountController {
             default:
                 return ResponseEntity.badRequest().build();
         }
-        
-        return accountOpt.map(ResponseEntity::ok)
+
+        return accountOpt.map(account -> ResponseEntity.ok(EntityDTOMapper.toAccountDTO(account)))
                 .orElse(ResponseEntity.notFound().build());
     }
 
@@ -96,17 +98,17 @@ public class AccountController {
      * @param accountNumber the account number to update
      * @param requestBody the request body containing the new balance
      * @param isolationLevel the isolation level to use (READ_UNCOMMITTED, READ_COMMITTED, REPEATABLE_READ, SERIALIZABLE)
-     * @return the updated account if found, or 404 if not found
+     * @return the updated account DTO if found, or 404 if not found
      */
     @PutMapping("/{accountNumber}/balance")
-    public ResponseEntity<Account> updateBalance(
+    public ResponseEntity<AccountDTO> updateBalance(
             @PathVariable String accountNumber,
             @RequestBody Map<String, String> requestBody,
             @RequestParam(defaultValue = "READ_COMMITTED") String isolationLevel) {
-        
+
         BigDecimal newBalance = new BigDecimal(requestBody.get("balance"));
         Optional<Account> accountOpt;
-        
+
         switch (isolationLevel.toUpperCase()) {
             case "READ_UNCOMMITTED":
                 accountOpt = accountService.updateBalanceReadUncommitted(accountNumber, newBalance);
@@ -123,8 +125,8 @@ public class AccountController {
             default:
                 return ResponseEntity.badRequest().build();
         }
-        
-        return accountOpt.map(ResponseEntity::ok)
+
+        return accountOpt.map(account -> ResponseEntity.ok(EntityDTOMapper.toAccountDTO(account)))
                 .orElse(ResponseEntity.notFound().build());
     }
 
@@ -133,17 +135,17 @@ public class AccountController {
      *
      * @param accountNumber the account number to update
      * @param requestBody the request body containing the amount to add
-     * @return the updated account if found, or 404 if not found
+     * @return the updated account DTO if found, or 404 if not found
      */
     @PutMapping("/{accountNumber}/balance/optimistic")
-    public ResponseEntity<Account> updateBalanceWithOptimisticLock(
+    public ResponseEntity<AccountDTO> updateBalanceWithOptimisticLock(
             @PathVariable String accountNumber,
             @RequestBody Map<String, String> requestBody) {
-        
+
         BigDecimal amount = new BigDecimal(requestBody.get("amount"));
         Optional<Account> accountOpt = accountService.updateBalanceWithOptimisticLock(accountNumber, amount);
-        
-        return accountOpt.map(ResponseEntity::ok)
+
+        return accountOpt.map(account -> ResponseEntity.ok(EntityDTOMapper.toAccountDTO(account)))
                 .orElse(ResponseEntity.notFound().build());
     }
 
@@ -152,17 +154,17 @@ public class AccountController {
      *
      * @param accountNumber the account number to update
      * @param requestBody the request body containing the amount to add
-     * @return the updated account if found, or 404 if not found
+     * @return the updated account DTO if found, or 404 if not found
      */
     @PutMapping("/{accountNumber}/balance/pessimistic")
-    public ResponseEntity<Account> updateBalanceWithPessimisticLock(
+    public ResponseEntity<AccountDTO> updateBalanceWithPessimisticLock(
             @PathVariable String accountNumber,
             @RequestBody Map<String, String> requestBody) {
-        
+
         BigDecimal amount = new BigDecimal(requestBody.get("amount"));
         Optional<Account> accountOpt = accountService.updateBalanceWithPessimisticLock(accountNumber, amount);
-        
-        return accountOpt.map(ResponseEntity::ok)
+
+        return accountOpt.map(account -> ResponseEntity.ok(EntityDTOMapper.toAccountDTO(account)))
                 .orElse(ResponseEntity.notFound().build());
     }
 }
