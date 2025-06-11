@@ -7,12 +7,12 @@
 :imagesdir: images
 :experimental:
 
-v1.0, 2023-12-15
 
 [NOTE]
 ====
+The complete project is available on  link:https://github.com/ahmedjaadi/isolation-levels-demo[GitHub]
 This project was created using JetBrains Junie with only 4 prompts,
-which are included in the git repository under the link:prompts[prompts] directory.
+which are included in the git repository under the link:https://github.com/ahmedjaadi/isolation-levels-demo/tree/main/prompts[prompts] directory.
 ====
 
 == Introduction
